@@ -1,13 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Link, useLocation, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import DownloaderForm from '../components/DownloaderForm';
 import VideoPreview from '../components/VideoPreview';
 import DownloadPopup from '../components/DownloadPopup';
 import Loader from '../components/Loader';
-import { analyzeUrl, downloadMedia, buildDirectDownloadUrl, isStreamableFormat, uploadCookies } from '../services/api';
+import { analyzeUrl, downloadMedia, buildDirectDownloadUrl, isStreamableFormat } from '../services/api';
 import { useToast } from '../context/ToastContext';
-import { useAuth } from '../context/AuthContext';
 import { DL_STATUS } from '../utils/dlStatus';
 
 const pageTransition = {
@@ -19,9 +18,7 @@ const pageTransition = {
 
 export default function Downloader() {
   const [searchParams] = useSearchParams();
-  const location = useLocation();
   const toast = useToast();
-  const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   const [video, setVideo] = useState(null);
   const [downloading, setDownloading] = useState(false);
@@ -171,12 +168,8 @@ export default function Downloader() {
 
             {error && (() => {
               const errLower = error.toLowerCase();
-              const needsCookies = errLower.includes('cookies') || errLower.includes('twitter') || errLower.includes('authentication');
-              const isFacebook = errLower.includes('facebook') || errLower.includes('fb.com');
-              const isInstagram = errLower.includes('instagram') || errLower.includes('instagr');
-              const showCookieUI = needsCookies || isFacebook || isInstagram;
-
-              const platformDomain = isFacebook ? 'facebook.com' : isInstagram ? 'instagram.com' : 'x.com';
+              const isLoginWall = errLower.includes('cookies') || errLower.includes('twitter') || errLower.includes('authentication') ||
+                errLower.includes('facebook') || errLower.includes('fb.com') || errLower.includes('instagram') || errLower.includes('instagr');
 
               return (
                 <motion.div
@@ -185,56 +178,14 @@ export default function Downloader() {
                   animate={{ opacity: 1, y: 0 }}
                 >
                   <p className="error-text">{error}</p>
-                  {showCookieUI ? (
-                    <div style={{ marginTop: 12 }}>
-                      {user ? (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'center' }}>
-                          <label className="btn-gradient" style={{ cursor: 'pointer', minWidth: 220 }}>
-                            Upload cookies.txt
-                            <input
-                              type="file"
-                              accept=".txt"
-                              style={{ display: 'none' }}
-                              onChange={async (e) => {
-                                const file = e.target.files[0];
-                                if (!file) return;
-                                try {
-                                  const text = await file.text();
-                                  await uploadCookies(text);
-                                  toast.success('Cookies uploaded! Try the link again.');
-                                  setError(null);
-                                } catch (err) {
-                                  toast.error(err.message || 'Failed to upload cookies');
-                                }
-                              }}
-                            />
-                          </label>
-                          <p className="dl-hint" style={{ margin: '8px 0 0', fontSize: '0.82rem', lineHeight: 1.5 }}>
-                            1. Install{' '}
-                            <a href="https://chromewebstore.google.com/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent, #6366f1)' }}>
-                              &quot;Get cookies.txt LOCALLY&quot;
-                            </a>{' '}
-                            Chrome extension<br />
-                            2. Log into <strong>{platformDomain}</strong> in Chrome<br />
-                            3. Visit <strong>{platformDomain}</strong>, click the extension icon, export<br />
-                            4. Upload the exported file above
-                          </p>
-                        </div>
-                      ) : (
-                        <p className="dl-hint" style={{ fontSize: '0.9rem', lineHeight: 1.5 }}>
-                          This platform requires login cookies.{' '}
-                          <Link to="/login" state={{ from: location.pathname + location.search }} className="auth-link">
-                            Log in
-                          </Link>{' '}
-                          to enable cookie uploads.
-                        </p>
-                      )}
-                    </div>
-                  ) : (
-                    <button className="btn-gradient-outline" onClick={() => setError(null)} style={{ marginTop: 12 }}>
-                      Try Again
-                    </button>
+                  {isLoginWall && (
+                    <p className="dl-hint" style={{ marginTop: 10, fontSize: '0.85rem', lineHeight: 1.5 }}>
+                      Content behind a login cannot be downloaded — try a public link instead.
+                    </p>
                   )}
+                  <button className="btn-gradient-outline" onClick={() => setError(null)} style={{ marginTop: 12 }}>
+                    Try Again
+                  </button>
                 </motion.div>
               );
             })()}

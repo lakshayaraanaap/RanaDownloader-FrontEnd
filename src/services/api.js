@@ -141,8 +141,3 @@ export const deleteHistory = (id) => api.delete(`/history/${id}`);
 // Contact
 export const submitContact = (data) => api.post('/contact', data);
 
-// Cookies
-export const uploadCookies = (content) =>
-  api.post('/cookies', content, {
-    headers: { 'Content-Type': 'text/plain' },
-  });
