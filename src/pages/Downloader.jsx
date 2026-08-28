@@ -5,7 +5,7 @@ import DownloaderForm from '../components/DownloaderForm';
 import VideoPreview from '../components/VideoPreview';
 import DownloadPopup from '../components/DownloadPopup';
 import Loader from '../components/Loader';
-import { analyzeUrl, downloadMedia, buildDirectDownloadUrl, isStreamableFormat } from '../services/api';
+import { analyzeUrlWithRetry, friendlyError, downloadMedia, buildDirectDownloadUrl, isStreamableFormat } from '../services/api';
 import { useToast } from '../context/ToastContext';
 import { DL_STATUS } from '../utils/dlStatus';
 
@@ -31,6 +31,7 @@ export default function Downloader() {
   const [dlFileName, setDlFileName] = useState('');
   const [dlError, setDlError] = useState('');
   const [instantHint, setInstantHint] = useState(false);
+  const [attemptLabel, setAttemptLabel] = useState('');
 
   const handleAnalyze = useCallback(
     async (url) => {
@@ -38,16 +39,21 @@ export default function Downloader() {
       setLoading(true);
       setError(null);
       setVideo(null);
+      setAttemptLabel('');
       try {
-        const res = await analyzeUrl(url);
+        const res = await analyzeUrlWithRetry(url, {
+          onRetry: (n) => setAttemptLabel(`Server busy — retrying (attempt ${n + 1}/3)...`),
+        });
         const analysis = res.data.analysis;
         setVideo(analysis);
         toast.success('Media analyzed successfully!');
       } catch (err) {
-        setError(err.message || 'Failed to analyze the URL. Please check and try again.');
-        toast.error(err.message || 'Analysis failed');
+        const msg = friendlyError(err, 'Failed to analyze the URL. Please check and try again.');
+        setError(msg);
+        toast.error(msg);
       } finally {
         setLoading(false);
+        setAttemptLabel('');
       }
     },
     [toast]
@@ -134,9 +140,10 @@ export default function Downloader() {
       setDlStatus(DL_STATUS.DONE);
       toast.success(`${label} downloaded!`);
     } catch (err) {
+      const msg = friendlyError(err, 'Download failed');
       setDlStatus(DL_STATUS.ERROR);
-      setDlError(err.message || 'Download failed');
-      toast.error(err.message || 'Download failed');
+      setDlError(msg);
+      toast.error(msg);
     } finally {
       setDownloading(false);
     }
@@ -164,7 +171,7 @@ export default function Downloader() {
           <DownloaderForm onAnalyze={handleAnalyze} loading={loading} />
 
           <div style={{ marginTop: 40 }}>
-            {loading && <Loader text="Analyzing URL..." />}
+            {loading && <Loader text={attemptLabel || 'Analyzing URL... (first request may take up to a minute on free hosting)'} />}
 
             {error && (() => {
               const errLower = error.toLowerCase();

@@ -77,17 +77,72 @@ api.interceptors.response.use(
 
     if (error.config?.responseType === 'blob' && error.response?.data instanceof Blob) {
       return error.response.data.text().then((text) => {
-        try { return Promise.reject(new Error(JSON.parse(text).message)); }
-        catch { return Promise.reject(new Error(text || 'Download failed')); }
+        try { return Promise.reject(fail(JSON.parse(text).message, status)); }
+        catch { return Promise.reject(fail(text || 'Download failed', status)); }
       });
     }
     const message =
       error.response?.data?.message ||
       error.message ||
       'Something went wrong. Please try again.';
-    return Promise.reject(new Error(message));
+    return Promise.reject(fail(message, status));
   }
 );
+
+// Errors carry the HTTP status so callers can distinguish transient
+// infrastructure failures (503/504/no response) from permanent ones.
+function fail(message, status) {
+  const err = new Error(message);
+  err.status = status ?? null;
+  return err;
+}
+
+// Free-hosting reality check: the backend runs on Render's free tier, which
+// sleeps when idle and can return generic "Internal server error" while the
+// extraction pipeline is overloaded. Those are transient — retrying a couple
+// of times with backoff rescues most requests without user intervention.
+function isTransient(err) {
+  if (err.status === null || err.status === undefined) return true; // network/CORS failure
+  if (err.status >= 500) return true;
+  return /internal server error/i.test(err.message || '');
+}
+
+export async function analyzeUrlWithRetry(url, { retries = 2, baseDelay = 2500, onRetry } = {}) {
+  let lastErr;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await analyzeUrl(url);
+    } catch (err) {
+      lastErr = err;
+      if (!isTransient(err) || attempt === retries) throw err;
+      onRetry?.(attempt + 1);
+      await new Promise((r) => setTimeout(r, baseDelay * (attempt + 1)));
+    }
+  }
+  throw lastErr;
+}
+
+// Maps raw backend/network errors to messages a real person can act on.
+export function friendlyError(err, fallback = 'Something went wrong. Please try again.') {
+  const msg = err?.message || '';
+  if (/internal server error/i.test(msg))
+    return 'The download service is busy or restarting. Please wait ~30 seconds and try again.';
+  if (/network error|err_network|failed to fetch/i.test(msg))
+    return 'Could not reach the server. Check your internet connection and try again.';
+  if (/timeout of|econnaborted/i.test(msg))
+    return 'The server took too long to respond (it may be waking up). Please try again.';
+  return msg || fallback;
+}
+
+// Wakes a sleeping Render free-tier instance before the user submits a link.
+// An OPTIONS preflight is handled instantly by the CORS middleware — enough to
+// spin the instance up without triggering any heavy extraction work.
+let warmedUp = false;
+export function warmUpServer() {
+  if (warmedUp) return;
+  warmedUp = true;
+  fetch(`${API_URL}/analyze`, { method: 'OPTIONS', mode: 'cors' }).catch(() => {});
+}
 
 // Auth
 export const register = (data) => api.post('/auth/register', data);
@@ -103,8 +158,7 @@ export const deleteProfile = () => api.delete('/users/profile');
 export const changePassword = (data) => api.put('/users/change-password', data);
 
 // Media
-export const analyzeUrl = (url) => api.post('/analyze', { url }, { timeout: 120000 });
-export const downloadMedia = (data, onProgress) =>
+export const analyzeUrl = (url) => api.post('/analyze', { url }, { timeout: 120000 });export const downloadMedia = (data, onProgress) =>
   api.post('/download', data, {
     responseType: 'blob',
     timeout: 600000,
